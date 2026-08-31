@@ -1,157 +1,114 @@
-# XDrive-Search — 共用碟 / NAS / 雲端碟 專用秒搜工具
+﻿# XDrive-Search ???梁蝣?/ NAS / ?脩垢蝣?撠蝘?撌亙
 
-> Everything 搜不到 `X:` / `K:` 這種網路磁碟？這個就是為它做的。
-
-**專為公司共用碟設計** — 以 `X:\` (`\\Ras-c2`) 為例，支援 **SolidWorks + AutoCAD** 圖檔秒搜、分類、拖曳複製。是 [awesome-agent-architecture](https://github.com/hardness1020/awesome-agent-architecture) 學習過程的實戰延伸：把「Harness 工程」用在解決真實痛點。
-
+> Everything ????`X:` / `K:` ?車蝬脰楝蝤?嚗停?舐摰???
+**撠?砍?梁蝣身閮?* ??隞?`X:\` (`\\Ras-c2`) ?箔?嚗??**SolidWorks + AutoCAD** ??蝘???憿??唾?鋆賬 [awesome-agent-architecture](https://github.com/hardness1020/awesome-agent-architecture) 摮貊????祕?啣辣隡賂??arness 撌亦???刻圾瘙箇?撖衣?暺?
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB) ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6) ![License](https://img.shields.io/badge/License-MIT-green) ![Files](https://img.shields.io/badge/Tested-36,669%20files%20%7C%2026.8GB-blue)
 
-## 為什麼做這個？
+## ?箔?暻澆???
 
-`Everything` 快是因為它直接讀硬碟的 MFT 總帳本。這招只對本機 `C:`/`D:` 有效，`X:` / `K:` 這種 **SMB 網路磁碟 / NAS / 雲端碟** 根本不給你 MFT，所以搜不到。
+`Everything` 敹急?摰?亥?蝖祉???MFT 蝮賢董?研??芸??祆? `C:`/`D:` ??嚗X:` / `K:` ?車 **SMB 蝬脰楝蝤? / NAS / ?脩垢蝣?* ?寞銝策雿?MFT嚗?隞交?銝??
+?砍極?瑟??楝嚗?*?芸楛??隞賢???*??
+1. 蝚砌?甈⊥? `X:\` ?冽?銝??摮?砍 `SQLite`嚗~/.kdrive_search/index.db`嚗?2. 銋????芣?遢? ??撟曇??獢???**頛詨?喟???*
+3. 瑼????? `F5` / `撱箇?/?湔蝝Ｗ?` 1-2 ??撠望??
+## ??寡
 
-本工具換個思路：**自己抄一份名單**。
+- **蝘?瑼?**嚗?港葉?*` `?` ?祉摮??征?賢??摮??券?賭葉嚗?- **????銝?萄?**嚗?券 / 3D??/ 2D??/ Excel / PPT / Word / PDF / ??`
+  - `3D?: `.sldprt` `.sldasm` `.step` `.stp` `.iges` `.stl` `.obj` `.ipt` `.iam` 蝑?(SolidWorks / Creo / Inventor ?芸?)
+  - `2D?: `.dwg` `.dxf` `.dwf` `.pdf` `.ai` 蝑?(AutoCAD ?芸?)
+- **憿舐內摰頝臬?**嚗??楝敺之撠耨?寞????- **??唾?鋆?*嚗憟賜?交??唳???鞈?憭橘???`Ctrl+C` ??獢 `Ctrl+V`嚗?游?瑼?
+- **憭**嚗Ctrl+暺?` 頝單?詻Shift+暺?` ?訾??Ctrl+A` ?券
+- **?喲?詨**嚗???獢?/ ????刻??冗 / 銴ˊ?唳???/ 銴ˊ??.. / 銴ˊ頝臬?
+- **?脣漲?航???*嚗?????脣漲璇?+ `??撌脫??XXX ??獢嚗???`?桀?` ?內
+- **?芸??菜葫**嚗?? `X:` / `K:` / `Z:` 蝑??函?蝬脰楝蝣?
+## 敹恍?憪?
+### ?湔?剁??刻嚗?
+1. ??[Releases](https://github.com/topllol821/XDrive-Search/releases) 銝? `XDriveSearch.exe` (??`X瑽賣?撠.exe`)
+2. ?曉獢暺銝??銝?摰? Python
+3. 銝?豢? `X:\` ????`撱箇?/?湔蝝Ｗ?` ??蝑?1-3 ??嚗?6k 瑼? 26.8 GB 撖行葫嚗?4. ?冽?撠?頛詨?摮?靘? `HDR110`??舀`?2310`
 
-1. 第一次把 `X:\` 全掃一遍，存到本地 `SQLite`（`~/.kdrive_search/index.db`）
-2. 之後打字只查這份名單 → 幾萬個檔案也是 **輸入即秒出**
-3. 檔案有變動按 `F5` / `建立/更新索引` 1-2 分鐘就更新
-
-## 功能特色
-
-- **秒搜檔名**：支援中文、`*` `?` 萬用字元、空白多關鍵字（全部命中）
-- **圖檔分類一鍵切**：`全部 / 3D圖 / 2D圖 / Excel / PPT / Word / PDF / 圖片`
-  - `3D圖`: `.sldprt` `.sldasm` `.step` `.stp` `.iges` `.stl` `.obj` `.ipt` `.iam` 等 (SolidWorks / Creo / Inventor 優化)
-  - `2D圖`: `.dwg` `.dxf` `.dwf` `.pdf` `.ai` 等 (AutoCAD 優化)
-- **顯示完整路徑**：檔名、路徑、大小、修改日期、類型
-- **拖曳即複製**：選好直接拖到桌面/資料夾，或 `Ctrl+C` → 桌面 `Ctrl+V`（支援多檔）
-- **多選**：`Ctrl+點擊` 跳格選、`Shift+點擊` 選一排、`Ctrl+A` 全選
-- **右鍵選單**：開啟檔案 / 開啟所在資料夾 / 複製到桌面 / 複製到... / 複製路徑
-- **進度可視化**：掃描時藍色進度條 + `⏳ 已收錄 XXX 個檔案`，完成 `叮咚` 提示
-- **自動偵測**：自動抓 `X:` / `K:` / `Z:` 等存在的網路碟
-
-## 快速開始
-
-### 直接用（推薦）
-
-1. 到 [Releases](https://github.com/topllol821/XDrive-Search/releases) 下載 `XDriveSearch.exe` (或 `X槽搜尋器.exe`)
-2. 放到桌面點兩下即開，不需安裝 Python
-3. 上方選擇 `X:\` → 按 `建立/更新索引` → 等 1-3 分鐘（36k 檔約 26.8 GB 實測）
-4. 在搜尋框輸入關鍵字，例如 `HDR110`、`支架`、`2310`
-
-### 從原始碼跑
-
+### 敺?憪Ⅳ頝?
 ```bash
 git clone https://github.com/topllol821/XDrive-Search
 cd XDrive-Search
 pip install pywin32 tkinterdnd2
 python XDriveSearch.py
-# 或
-python "X槽搜尋器.py"
+# ??python "X瑽賣?撠.py"
 ```
 
-依賴：`Python 3.10+`，`pywin32` (剪貼簿 CF_HDROP)，`tkinterdnd2` (可選)
+靘陷嚗Python 3.10+`嚗pywin32` (?芾票蝪?CF_HDROP)嚗tkinterdnd2` (?舫)
 
-### 打包成 exe
+### ????exe
 
 ```bash
 pip install pyinstaller pywin32 tkinterdnd2
-pyinstaller --onefile --noconsole --name "X槽搜尋器" \
+pyinstaller --onefile --noconsole --name "X瑽賣?撠" \
   --hidden-import win32clipboard --hidden-import win32con --hidden-import tkinterdnd2 \
   XDriveSearch.py
-# 產物在 dist/X槽搜尋器.exe
+# ?Ｙ??dist/X瑽賣?撠.exe
 ```
 
-## 使用方法
+## 雿輻?寞?
 
-| 動作 | 操作 |
+| ?? | ?? |
 |------|------|
-| 搜尋 | 直接打字，支援 `HDR110 支架` 多關鍵字、`*.dwg` 萬用字元 |
-| 分類 | 點上方 `3D圖` / `2D圖` 等按鈕 |
-| 開檔 | 雙擊 或 右鍵→開啟檔案 |
-| 開資料夾 | 右鍵→開啟所在資料夾 |
-| 複製到桌面 | 右鍵→複製到桌面，或 選取後 `Ctrl+C` → 桌面 `Ctrl+V` |
-| 拖曳複製 | 選好檔案直接拖到桌面/資料夾放開 |
-| 多選 | `Ctrl+點` 跳選、`Shift+點` 選一排、`Ctrl+A` 全選 |
-| 重新整理 | `F5` 或 `建立/更新索引` |
+| ?? | ?湔??嚗??`HDR110 ?舀` 憭??萄??*.dwg` ?祉摮? |
+| ?? | 暺???`3D? / `2D? 蝑???|
+| ?? | ?? ???喲????獢?|
+| ???冗 | ?喲?????刻??冗 |
+| 銴ˊ?唳???| ?喲??鋆賢獢嚗? ?詨?敺?`Ctrl+C` ??獢 `Ctrl+V` |
+| ?銴ˊ | ?詨末瑼??湔?獢/鞈?憭暹??|
+| 憭 | `Ctrl+暺 頝喲?Shift+暺 ?訾??Ctrl+A` ?券 |
+| ??渡? | `F5` ??`撱箇?/?湔蝝Ｗ?` |
 
-> 索引位置：`C:\Users\你的帳號\.kdrive_search\index.db`，刪掉即重置。
+> 蝝Ｗ?雿蔭嚗C:\Users\雿?撣唾?\.kdrive_search\index.db`嚗??蔭??
+## 頦拚??? & 閫?捱?孵?
 
-## 踩過的坑 & 解決方式
+?銝剜? Everything ?箔?銝?雯頝舐??誑??Tkinter ??琿頦拐?銝???渡?憒?嚗?
+### ??1嚗verything ?箔?????X: / K:嚗?
+- **?曇情**嚗verything 撠?`X:\` ?∠???- **??**嚗verything 霈 **NTFS MFT + USN Journal**嚗撠璈?NTFS ???X:` ??SMB ??嚗 MFT??- **閫?捱**嚗??`os.walk` ?冽? + `SQLite` 蝝Ｗ? + `LIKE '%keyword%'` ???嗾?祆? `SQLite` 摰??雿??? <50ms??
+### ??2嚗QLite WAL 銝??transaction ?扯身摰?
+- **?曇情**嚗sqlite3.OperationalError: cannot change into wal mode from within a transaction`
+- **??**嚗PRAGMA journal_mode=WAL` ?瑁??歇??`DELETE` ??transaction ?扼?- **閫?捱**嚗? `con.execute("PRAGMA journal_mode=WAL")` ??`cur = con.cursor(); cur.execute("DELETE")`?? PRAGMA 蝘餃 `BEGIN` 銋???
+### ??3嚗???閬????
+- **?曇情**嚗??遣蝡??湔蝝Ｗ???撌虫?閫? `???? X:/...`嚗嗾???∪?擖?雿輻?誑?箇璈?- **??**嚗脣漲?芸瘥?200 ???冗?銝甈∴?蝬脰楝蝣??嚗???∟??胯?- **閫?捱**嚗?箸? 30 ???冗?? 1500 ??獢停 `progress_q.put(...)`嚗?銝?`ttk.Progressbar(indeterminate)` + `?訢 ? + `start(12)/stop()`??
+### ??4嚗kinter Treeview ??Ctrl 憭鋡怨???
+- **?曇情**嚗Ctrl+暺?` ?⊥?頝單憭嚗Shift` ?訾??迤撣詻?- **??**嚗?摰?`<ButtonPress-1>` 銝血 handler ??`selection_set/remove`嚗? Treeview ?身??`extended` ?詨??摩銵??add="+"` 銝摰園?頛臬??身?摩?賣?頝???敺撠 Ctrl 憭望???- **閫?捱**嚗璉摰園?頛荔?霈??祇??粥??嚗Ctrl+暺?` ?桃蝬?`<Control-ButtonPress-1>` 銝?`return "break"` ?? `selection_add/remove`嚗Shift` 銋?隡潸???敺?`after(30ms)` ???`drag_paths`??
+### ??5嚗??喳獢?⊥??迤銴ˊ
 
-開發中把 Everything 為何不能搜網路碟、以及 Tkinter 的地雷都踩了一遍，整理如下：
-
-### 坑 1：Everything 為何搜不到 X: / K:？
-
-- **現象**：Everything 對 `X:\` 無結果。
-- **原因**：Everything 讀 **NTFS MFT + USN Journal**，只對本機 NTFS 有效。`X:` 是 SMB 掛載，無 MFT。
-- **解決**：改為 `os.walk` 全掃 + `SQLite` 索引 + `LIKE '%keyword%'` 搜尋。幾萬檔 `SQLite` 完全扛得住，搜尋 <50ms。
-
-### 坑 2：SQLite WAL 不能在 transaction 內設定
-
-- **現象**：`sqlite3.OperationalError: cannot change into wal mode from within a transaction`
-- **原因**：`PRAGMA journal_mode=WAL` 執行時已在 `DELETE` 的 transaction 內。
-- **解決**：先 `con.execute("PRAGMA journal_mode=WAL")` 再 `cur = con.cursor(); cur.execute("DELETE")`。把 PRAGMA 移到 `BEGIN` 之前。
-
-### 坑 3：掃描時視窗像當掉
-
-- **現象**：按「建立/更新索引」後左下角只停在 `開始掃描 X:/...`，幾分鐘無回饋，使用者以為當機。
-- **原因**：進度只在每 200 個資料夾回報一次，網路碟掃描慢，長時間無訊息。
-- **解決**：改為每 30 個資料夾或每 1500 個檔案就 `progress_q.put(...)`，加上 `ttk.Progressbar(indeterminate)` + `⏳` 動畫 + `start(12)/stop()`。
-
-### 坑 4：Tkinter Treeview 的 Ctrl 多選被覆蓋
-
-- **現象**：`Ctrl+點擊` 無法跳格多選，`Shift` 選一排正常。
-- **原因**：綁定 `<ButtonPress-1>` 並在 handler 內 `selection_set/remove`，與 Treeview 預設的 `extended` 選取邏輯衝突。`add="+"` 下自家邏輯和預設邏輯都會跑，先清後選導致 Ctrl 失效。
-- **解決**：放棄自家邏輯，讓一般點擊走原生；`Ctrl+點擊` 單獨綁 `<Control-ButtonPress-1>` 並 `return "break"` 手動 `selection_add/remove`，`Shift` 也類似處理。最後 `after(30ms)` 再更新 `drag_paths`。
-
-### 坑 5：拖曳到桌面無法真正複製
-
-- **現象**：Tkinter 沒有原生「拖檔案到 Explorer」API，單純 `clipboard_append` 只是文字。
-- **原因**：Explorer 拖放需要 `CF_HDROP` 格式的 `DROPFILES` 結構（`fWide=1` 的 UTF-16LE），不是普通文字。
-- **解決**：用 `pywin32` 的 `win32clipboard`：
-  ```python
+- **?曇情**嚗kinter 瘝?????瑼???Explorer?PI嚗蝝?`clipboard_append` ?芣????- **??**嚗xplorer ??閬?`CF_HDROP` ?澆???`DROPFILES` 蝯?嚗fWide=1` ??UTF-16LE嚗?銝?桅?摮?- **閫?捱**嚗 `pywin32` ??`win32clipboard`嚗?  ```python
   header = struct.pack("IIIii", 20, 0,0,0,1)  # pFiles=20, fWide=1
   data = ("\0".join(files) + "\0\0").encode("utf-16le")
   win32clipboard.SetClipboardData(win32con.CF_HDROP, header+data)
   ```
-  放入剪貼簿後，使用者「拖到桌面放開」或「`Ctrl+V`」Explorer 都能識別為檔案複製。另外提供 `shutil.copy2` 的 `複製到桌面/資料夾` 作為兜底。
+  ?曉?芾票蝪踹?嚗蝙?刻??唳??Ｘ???Ctrl+V`?xplorer ?質霅?箸?獢?鋆賬憭?靘?`shutil.copy2` ??`銴ˊ?唳???鞈?憭霉 雿????
+### ??6嚗yInstaller 銝剜?瑼?鈭Ⅳ & ?
 
-### 坑 6：PyInstaller 中文檔名亂碼 & 占用
+- **?曇情**嚗pyinstaller --name "X瑽賣?撠"` ?Ｙ???`X瑽賣?撠.exe` ??PowerShell 憿舐內 `X嚙諸搜嚙瞎嚙踝蕭.exe`嚗?鈭活????`PermissionError: [WinError 5]`??- **??**嚗indows PowerShell OEM codepage ??UTF-8 銝??湛?`exe` 隞?瑁?銝剛◤????- **閫?捱**嚗??? `Stop-Process -Name "X瑽賣?撠"` + `Remove-Item`嚗?????`-LiteralPath` ??`Move-Item` ????潔?????靘?? `XDriveSearch.exe` ?踹??啣?????
+### ??7嚗雯頝舐? `stat()` ?嗥憭望? & Thumbs.db ?芷
 
-- **現象**：`pyinstaller --name "X槽搜尋器"` 產生的 `X槽搜尋器.exe` 在 PowerShell 顯示 `X�ѷj�M��.exe`，且二次打包時 `PermissionError: [WinError 5]`。
-- **原因**：Windows PowerShell OEM codepage 與 UTF-8 不一致；`exe` 仍在執行中被鎖住。
-- **解決**：打包前 `Stop-Process -Name "X槽搜尋器"` + `Remove-Item`，打包後用 `-LiteralPath` 的 `Move-Item` 重命名，發佈時同時提供英文名 `XDriveSearch.exe` 避免環境問題。
-
-### 坑 7：網路碟 `stat()` 偶爾失敗 & Thumbs.db 噪音
-
-- **現象**：`fp.stat()` 在網路瞬斷時拋異常；結果混雜大量 `Thumbs.db` `~$` 暫存檔。
-- **解決**：`try: stat() except: size=0,mtime=0` 容錯；目前保留 `Thumbs.db` 以便排查，後續可加入黑名單過濾。
-
-## 專案結構
+- **?曇情**嚗fp.stat()` ?函雯頝舐?瑟??撣賂?蝯?瘛琿?憭折? `Thumbs.db` `~$` ?怠?瑼?- **閫?捱**嚗try: stat() except: size=0,mtime=0` 摰寥嚗????`Thumbs.db` 隞乩噶?嚗?蝥?暺??桅?瞈整?
+## 撠?蝯?
 
 ```
 XDrive-Search/
-├── XDriveSearch.py          # 主程式（英文檔名，推薦）
-├── X槽搜尋器.py              # 同內容，中文檔名
-├── XDriveSearch.exe         # 打包成品（Release）
-├── README.md
-├── .gitignore
-└── assets/                  # (可放截圖)
+??? XDriveSearch.py          # 銝餌?撘??望?瑼?嚗?佗?
+??? X瑽賣?撠.py              # ?摰對?銝剜?瑼?
+??? XDriveSearch.exe         # ????嚗elease嚗???? README.md
+??? .gitignore
+??? assets/                  # (?舀?芸?)
 ```
 
-## 實測數據
+## 撖行葫?豢?
 
-- 環境：`X:\` (\\Ras-c2) 網路碟
-- 數量：**36,669 個檔案 / 約 26.8 GB**
-- 掃描：約 **90-180 秒**（視網路）
-- 搜尋：輸入即回，`LIMIT 8000` 內 <50ms
+- ?啣?嚗X:\` (\\Ras-c2) 蝬脰楝蝣?- ?賊?嚗?*36,669 ??獢?/ 蝝?26.8 GB**
+- ??嚗? **90-180 蝘?*嚗?蝬脰楝嚗?- ??嚗撓?亙??`LIMIT 8000` ??<50ms
 
-## 致謝
+## ?渲?
 
-- 靈感：`voidtools Everything`
-- 學習框架：[awesome-agent-architecture](https://github.com/hardness1020/awesome-agent-architecture) — 從 Harness 觀念到「索引、進度、權限、拖曳、打包」的組合
-- 依賴：`pywin32`, `tkinterdnd2`, `PyInstaller`
+- ??嚗voidtools Everything`
+- 摮貊?獢嚗awesome-agent-architecture](https://github.com/hardness1020/awesome-agent-architecture) ??敺?Harness 閫敹萄?揣撘脣漲?????喋???蝯?
+- 靘陷嚗pywin32`, `tkinterdnd2`, `PyInstaller`
 
 ## License
 
-MIT — 可自由用於公司內部與二次開發。
+MIT ???航?梁?澆?詨?刻?鈭活???
