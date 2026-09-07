@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-K槽專用搜尋器 - 給共用碟/NAS/雲端碟用的 Everything 替代版
+X搜索器 - 給共用碟/NAS/雲端碟用的 Everything 替代版
 幾萬個檔案秒搜，支援 3D/2D 分類
 作者：Muse Spark | 2026-08-31
 """
@@ -12,6 +12,7 @@ import threading
 import sqlite3
 import subprocess
 from pathlib import Path
+import pathlib
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -34,7 +35,7 @@ except:
     DND_FILES = None
 
 # ========== 設定 ==========
-APP_NAME = "K槽搜尋器"
+APP_NAME = "X搜索器"
 DB_DIR = Path.home() / ".kdrive_search"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "index.db"
@@ -67,6 +68,23 @@ CATEGORIES = {
 
 for k,v in CATEGORIES.items():
     if v: CATEGORIES[k] = {x.lower() for x in v}
+
+# 黑名單：索引時跳過（增量更新時亦生效）
+EXCLUDE_DIR_NAMES = {"$RECYCLE.BIN", "System Volume Information", "$Recycle.Bin", ".git", "__pycache__", ".svn", "node_modules", ".vscode"}
+EXCLUDE_FILE_NAMES = {"Thumbs.db", "desktop.ini", "ehthumbs.db", ".DS_Store"}
+EXCLUDE_PREFIXES = ("~$", ".~")
+EXCLUDE_SUFFIXES = {".tmp", ".log", ".bak", ".swp", ".lock", ".lck"}
+
+def _should_exclude(path_str, filename=None):
+    """判斷是否該跳過（黑名單）"""
+    fn = filename if filename is not None else pathlib.Path(path_str).name
+    if fn in EXCLUDE_FILE_NAMES:
+        return True
+    if fn.startswith(EXCLUDE_PREFIXES):
+        return True
+    if pathlib.Path(fn).suffix.lower() in EXCLUDE_SUFFIXES:
+        return True
+    return False
 
 
 
@@ -104,8 +122,8 @@ class Indexer:
         con.commit()
         con.close()
 
-    def build_index(self, root_path, on_done=None):
-        """背景執行緒掃描"""
+    def build_index(self, root_path, on_done=None, incremental=True):
+        """背景執行緒掃描（支援增量 + 黑名單）"""
         self._stop.clear()
         root = Path(root_path)
         if not root.exists():
@@ -114,37 +132,56 @@ class Indexer:
             return
         start = time.time()
         con = sqlite3.connect(self.db_path)
-        # WAL 必須在 transaction 外設定
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.execute("PRAGMA synchronous=OFF")
         except: pass
         cur = con.cursor()
-        cur.execute("DELETE FROM files")
+        # 判斷是否可增量
+        try:
+            cur.execute("SELECT COUNT(*) FROM files")
+            existing_cnt = cur.fetchone()[0]
+            use_incremental = bool(incremental and existing_cnt and existing_cnt > 0)
+        except:
+            use_incremental = False
+
+        if use_incremental:
+            # 載入舊索引 path->(size,mtime) 用於比對
+            cur.execute("SELECT path, size, mtime FROM files")
+            existing_map = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        else:
+            cur.execute("DELETE FROM files")
+            existing_map = {}
+
         count = 0
-        batch = []
+        new_cnt = 0
+        upd_cnt = 0
+        skip_cnt = 0
+        batch_insert = []
+        batch_update = []
         BATCH_SIZE = 2000
         scanned_dirs = 0
+        excluded_cnt = 0
         try:
             for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=lambda e: None):
                 if self._stop.is_set():
                     break
-                # 跳過隱藏/系統資料夾加速（可選）
-                # dirnames[:] = [d for d in dirnames if not d.startswith('.') and d not in ['$RECYCLE.BIN','System Volume Information']]
+                # 黑名單過濾資料夾（大幅加速 + 避開系統垃圾）
+                dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES and not d.startswith(".")]
                 scanned_dirs += 1
-                # 每 30 個資料夾或每 2000 檔就回報一次，讓進度條會動
                 if scanned_dirs % 30 == 0 or count % 1500 == 0:
-                    self.progress_q.put(("progress", f"⏳ 掃描中... {dirpath} | 已收錄 {count} 個檔案 | {count//1000}k"))
-                # 每批次提交後也提示
+                    self.progress_q.put(("progress", f"⏳ 掃描中... {dirpath} | 已收錄 {count} 個 (新增{new_cnt}/更新{upd_cnt}/跳過{excluded_cnt})"))
                 if count % 2000 == 0 and count>0:
-                    self.progress_q.put(("progress", f"⏳ 掃描中... 已收錄 {count} 個檔案，請稍候..."))
+                    self.progress_q.put(("progress", f"⏳ 掃描中... 已收錄 {count} 個，請稍候..."))
                 for fn in filenames:
                     if self._stop.is_set():
                         break
+                    if _should_exclude(dirpath, fn):
+                        excluded_cnt += 1
+                        continue
                     try:
                         fp = Path(dirpath) / fn
                         ext = fp.suffix.lower()
-                        # 用 lstat 避免跟隨捷徑
                         try:
                             st = fp.stat()
                             size = st.st_size
@@ -152,23 +189,58 @@ class Indexer:
                         except:
                             size = 0
                             mtime = 0
-                        batch.append((fn, fn.lower(), str(fp), dirpath, ext, size, mtime))
+                        full = str(fp)
+                        if use_incremental and full in existing_map:
+                            old_size, old_mtime = existing_map[full]
+                            # 若大小與時間皆未變，視為未變更，僅從待刪清單移除
+                            if old_size == size and old_mtime == mtime:
+                                del existing_map[full]
+                                skip_cnt += 1
+                                count += 1
+                                continue
+                            # 有變更 → 更新
+                            batch_update.append((fn, fn.lower(), dirpath, ext, size, mtime, full))
+                            del existing_map[full]
+                            upd_cnt += 1
+                        else:
+                            batch_insert.append((fn, fn.lower(), full, dirpath, ext, size, mtime))
+                            if use_incremental and full in existing_map:
+                                del existing_map[full]
+                            new_cnt += 1
                         count += 1
-                        if len(batch) >= BATCH_SIZE:
-                            cur.executemany("INSERT INTO files(name,name_lower,path,dir,ext,size,mtime) VALUES (?,?,?,?,?,?,?)", batch)
-                            batch.clear()
+                        if len(batch_insert) >= BATCH_SIZE:
+                            cur.executemany("INSERT INTO files(name,name_lower,path,dir,ext,size,mtime) VALUES (?,?,?,?,?,?,?)", batch_insert)
+                            batch_insert.clear()
+                        if len(batch_update) >= BATCH_SIZE:
+                            cur.executemany("UPDATE files SET name=?, name_lower=?, dir=?, ext=?, size=?, mtime=? WHERE path=?", batch_update)
+                            batch_update.clear()
                     except Exception:
                         continue
-            if batch:
-                cur.executemany("INSERT INTO files(name,name_lower,path,dir,ext,size,mtime) VALUES (?,?,?,?,?,?,?)", batch)
+            if batch_insert:
+                cur.executemany("INSERT INTO files(name,name_lower,path,dir,ext,size,mtime) VALUES (?,?,?,?,?,?,?)", batch_insert)
+            if batch_update:
+                cur.executemany("UPDATE files SET name=?, name_lower=?, dir=?, ext=?, size=?, mtime=? WHERE path=?", batch_update)
+            # 增量：剩餘的 existing_map 即為已刪除的檔案
+            del_cnt = 0
+            if use_incremental and existing_map:
+                del_paths = list(existing_map.keys())
+                # 分批刪除（避免 SQLite 參數過多）
+                for i in range(0, len(del_paths), 900):
+                    chunk = del_paths[i:i+900]
+                    cur.executemany("DELETE FROM files WHERE path=?", [(p,) for p in chunk])
+                del_cnt = len(del_paths)
             con.commit()
-            # 重建 FTS
-            cur.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')")
-            con.commit()
+            if not use_incremental:
+                # 完整重建才需要 rebuild FTS
+                cur.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')")
+                con.commit()
         finally:
             con.close()
         elapsed = time.time() - start
-        self.progress_q.put(("done", f"完成！共 {count} 個檔案，耗時 {elapsed:.1f} 秒 | 已建立索引"))
+        if use_incremental:
+            self.progress_q.put(("done", f"增量完成！掃描 {count} 個，新增{new_cnt}/更新{upd_cnt}/刪除{del_cnt}/跳過黑名單{excluded_cnt}，耗時 {elapsed:.1f}s"))
+        else:
+            self.progress_q.put(("done", f"完整重建完成！共 {count} 個檔案，跳過黑名單{excluded_cnt}，耗時 {elapsed:.1f} 秒"))
         if on_done:
             on_done(count)
 
@@ -228,7 +300,7 @@ BaseTk = TkinterDnD.Tk if HAS_DND else tk.Tk
 class App(BaseTk):
     def __init__(self):
         super().__init__()
-        self.title(f"{APP_NAME} — 共用碟秒搜版 (幾萬檔專用) | 支援拖曳到桌面")
+        self.title(f"{APP_NAME}")
         self.geometry("1100x680")
         self.minsize(900, 520)
         # 讓視窗在工作列有圖示
@@ -267,6 +339,9 @@ class App(BaseTk):
         ttk.Button(top, text="瀏覽...", command=self.browse).pack(side=tk.LEFT)
         ttk.Button(top, text="建立 / 更新索引", command=self.start_index).pack(side=tk.LEFT, padx=8)
         ttk.Button(top, text="停止", command=self.indexer.stop).pack(side=tk.LEFT)
+        self.incremental_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(top, text="增量更新", variable=self.incremental_var).pack(side=tk.LEFT, padx=(10,2))
+        ttk.Label(top, text="(黑名單 Thumbs.db/~$/.tmp 已排除)", foreground="#6b7280", font=("Microsoft JhengHei", 7)).pack(side=tk.LEFT)
         # 搜尋列
         search_frame = ttk.Frame(self, padding=(10,0,10,8))
         search_frame.pack(fill=tk.X)
@@ -332,6 +407,8 @@ class App(BaseTk):
         self.menu.add_separator()
         self.menu.add_command(label="複製完整路徑", command=self.copy_path)
         self.menu.add_command(label="複製檔名", command=self.copy_name)
+        self.menu.add_separator()
+        self.menu.add_command(label="刪除選取檔案", command=self.delete_selected)
         # 拖曳提示 - 更新為多選
         hint = "💡 提示：按住 Ctrl 點選多個，或 Shift 選一排 | 選好後直接拖到桌面 或 Ctrl+C→桌面Ctrl+V 一次複製多個"
         ttk.Label(self, text=hint, foreground="#6b7280", font=("Microsoft JhengHei", 8)).pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0,2))
@@ -354,7 +431,9 @@ class App(BaseTk):
                 btn.configure(style="TButton")
         # 動態建立 Accent 樣式
         s = ttk.Style()
-        s.configure("Accent.TButton", background="#2563eb", foreground="white")
+        # 選中時：黑字 + 藍框（不要白字）
+        s.configure("Accent.TButton", background="white", foreground="black", bordercolor="#2563eb", borderwidth=2, relief="solid", font=("Microsoft JhengHei", 9, "bold"))
+        s.map("Accent.TButton", foreground=[("active","black"),("pressed","black"),("selected","black"),("!disabled","black")], background=[("active","#eff6ff"),("pressed","#dbeafe")], bordercolor=[("active","#1d4ed8"),("pressed","#1e40af")], relief=[("pressed","sunken")])
 
     def bind_events(self):
         self.keyword_var.trace_add("write", lambda *_: self.schedule_search())
@@ -377,6 +456,8 @@ class App(BaseTk):
         # 額外支援 Ctrl+A 全選
         self.tree.bind("<Control-a>", lambda e: (self.tree.selection_set(self.tree.get_children()), self._update_drag_paths(), "break")[2])
         self.tree.bind("<Control-A>", lambda e: (self.tree.selection_set(self.tree.get_children()), self._update_drag_paths(), "break")[2])
+        self.tree.bind("<Delete>", lambda e: self.delete_selected())
+        self.bind("<Delete>", lambda e: self.delete_selected())
 
     def schedule_search(self):
         if self.search_after_id:
@@ -411,14 +492,16 @@ class App(BaseTk):
         if not Path(root).exists():
             messagebox.showerror("路徑錯誤", f"找不到路徑:\n{root}\n\n請確認 X: / K: 已連線，或按「瀏覽」重選。")
             return
-        if messagebox.askyesno("建立索引", f"即將掃描:\n{root}\n\n幾萬個檔案約 1-3 分鐘完成，期間可正常使用舊索引。\n開始嗎？"):
+        mode = "增量更新（僅變更)" if (self.incremental_var.get() if hasattr(self, "incremental_var") else True) else "完整重建"
+        if messagebox.askyesno("建立索引", f"即將{mode}掃描:\n{root}\n\n增量約10-20秒，完整約1-3分鐘，期間可正常使用舊索引。\n\n黑名單已排除 Thumbs.db/~$/.tmp 等暫存檔。\n開始嗎？"):
             self.status_var.set(f"⏳ 開始掃描 {root} ... 請稍候，正在讀取檔案清單")
             self.dot_var.set("⏳")
             self.dot_label.configure(foreground="#f59e0b")
             try: self.progress.start(12)
             except: pass
             self.update_idletasks()
-            th = threading.Thread(target=self.indexer.build_index, args=(root, lambda c: self.after(0, self.on_index_done)), daemon=True)
+            inc = self.incremental_var.get() if hasattr(self, "incremental_var") else True
+            th = threading.Thread(target=self.indexer.build_index, args=(root, lambda c: self.after(0, self.on_index_done), inc), daemon=True)
             th.start()
 
     def on_index_done(self):
@@ -507,10 +590,78 @@ class App(BaseTk):
         self.clipboard_append(name)
         self.status_var.set(f"已複製檔名: {name}")
 
+    def delete_selected(self):
+        """刪除選取的檔案（含多選），含二次確認並同步更新索引與列表"""
+        sels = self.tree.selection()
+        paths = []
+        for iid in sels:
+            tags = self.tree.item(iid, "tags")
+            if tags:
+                paths.append(tags[0])
+        if not paths:
+            p = self.get_selected_path()
+            if p:
+                paths = [p]
+        if not paths:
+            return
+        # 確認對話框
+        if len(paths) == 1:
+            msg = f"確定要刪除以下檔案嗎？\n\n{paths[0]}\n\n此動作無法復原（網路磁碟不會進資源回收筒）！"
+        else:
+            preview = "\n".join(paths[:10])
+            if len(paths) > 10:
+                preview += f"\n...還有 {len(paths)-10} 個"
+            msg = f"確定要刪除 {len(paths)} 個檔案嗎？\n\n{preview}\n\n此動作無法復原！"
+        if not messagebox.askyesno("確認刪除", msg, icon="warning"):
+            return
+        errors = []
+        deleted = []
+        for p in paths:
+            try:
+                pp = Path(p)
+                if pp.is_dir():
+                    shutil.rmtree(pp)
+                elif pp.exists():
+                    try:
+                        from send2trash import send2trash
+                        send2trash(str(pp))
+                    except ImportError:
+                        pp.unlink()
+                    except Exception:
+                        if pp.exists():
+                            pp.unlink()
+                else:
+                    pass
+                deleted.append(p)
+            except Exception as e:
+                errors.append(f"{p}: {e}")
+        if deleted:
+            try:
+                con = sqlite3.connect(self.DB_PATH)
+                con.executemany("DELETE FROM files WHERE path=?", [(d,) for d in deleted])
+                con.commit()
+                con.close()
+            except Exception:
+                pass
+            for iid in list(sels):
+                try:
+                    self.tree.delete(iid)
+                except Exception:
+                    pass
+            self._update_drag_paths()
+            self.count_var.set(f"剩餘 {len(self.tree.get_children())} 筆")
+        if errors:
+            messagebox.showerror("部分刪除失敗", "\n".join(errors))
+            self.status_var.set(f"已刪除 {len(deleted)} 個，{len(errors)} 個失敗")
+        else:
+            self.status_var.set(f"已刪除 {len(deleted)} 個檔案")
+
     def show_menu(self, event):
         iid = self.tree.identify_row(event.y)
         if iid:
-            self.tree.selection_set(iid)
+            # 若右鍵點在已選取的多選項目上，保留多選；否則單選該列
+            if iid not in self.tree.selection():
+                self.tree.selection_set(iid)
             self.menu.tk_popup(event.x_root, event.y_root)
 
     def sort_by(self, col):
