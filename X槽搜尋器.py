@@ -19,6 +19,7 @@ from tkinter import ttk, filedialog, messagebox
 import queue
 import fnmatch
 import shutil
+import csv
 # 拖曳到桌面需要的 win32
 try:
     import win32clipboard
@@ -247,7 +248,7 @@ class Indexer:
     def stop(self):
         self._stop.set()
 
-    def search(self, keyword, category="全部", limit=5000):
+    def search(self, keyword, category="全部", limit=5000, date_from=None, date_to=None, size_from=None, size_to=None):
         con = sqlite3.connect(self.db_path)
         cur = con.cursor()
         keyword = (keyword or "").strip()
@@ -271,6 +272,18 @@ class Indexer:
             placeholders = ",".join("?" for _ in ext_filter)
             where.append(f"ext IN ({placeholders})")
             params.extend(list(ext_filter))
+        if date_from is not None:
+            where.append("mtime >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            where.append("mtime <= ?")
+            params.append(date_to)
+        if size_from is not None:
+            where.append("size >= ?")
+            params.append(size_from)
+        if size_to is not None:
+            where.append("size <= ?")
+            params.append(size_to)
         sql = "SELECT name, path, dir, ext, size, mtime FROM files"
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -360,6 +373,48 @@ class App(BaseTk):
             b.pack(side=tk.LEFT, padx=3)
             self.cat_buttons[cat] = b
         self.highlight_cat()
+        # 篩選列：日期 / 大小 + 匯出
+        filter_frame = ttk.Frame(self, padding=(10,0,10,8))
+        filter_frame.pack(fill=tk.X)
+        # 日期篩選
+        ttk.Label(filter_frame, text="日期:").pack(side=tk.LEFT)
+        self.date_from_var = tk.StringVar()
+        self.date_to_var = tk.StringVar()
+        ent_from = ttk.Entry(filter_frame, textvariable=self.date_from_var, width=12, font=("Microsoft JhengHei", 9))
+        ent_from.pack(side=tk.LEFT, padx=(4,2))
+        ent_from.insert(0, "")
+        ent_from.bind("<FocusIn>", lambda e: self._show_hint(ent_from, "YYYY-MM-DD"))
+        ttk.Label(filter_frame, text="~").pack(side=tk.LEFT)
+        ent_to = ttk.Entry(filter_frame, textvariable=self.date_to_var, width=12, font=("Microsoft JhengHei", 9))
+        ent_to.pack(side=tk.LEFT, padx=2)
+        # 快捷按鈕
+        ttk.Button(filter_frame, text="今天", width=5, command=lambda: self.set_date_preset("today")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(filter_frame, text="7天", width=5, command=lambda: self.set_date_preset("7d")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(filter_frame, text="30天", width=5, command=lambda: self.set_date_preset("30d")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(filter_frame, text="清除", width=5, command=lambda: self.clear_date_filter()).pack(side=tk.LEFT, padx=2)
+        # 大小篩選 + 匯出 同一行右側
+        size_frame = ttk.Frame(self, padding=(10,0,10,8))
+        size_frame.pack(fill=tk.X)
+        ttk.Label(size_frame, text="大小:").pack(side=tk.LEFT)
+        self.size_min_var = tk.StringVar()
+        self.size_max_var = tk.StringVar()
+        ent_min = ttk.Entry(size_frame, textvariable=self.size_min_var, width=8, font=("Microsoft JhengHei", 9))
+        ent_min.pack(side=tk.LEFT, padx=(4,2))
+        ttk.Label(size_frame, text="~").pack(side=tk.LEFT)
+        ent_max = ttk.Entry(size_frame, textvariable=self.size_max_var, width=8, font=("Microsoft JhengHei", 9))
+        ent_max.pack(side=tk.LEFT, padx=2)
+        ttk.Label(size_frame, text="MB").pack(side=tk.LEFT)
+        ttk.Button(size_frame, text="<10M", width=6, command=lambda: self.set_size_preset("<10")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(size_frame, text="10-100M", width=8, command=lambda: self.set_size_preset("10-100")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(size_frame, text=">100M", width=6, command=lambda: self.set_size_preset(">100")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(size_frame, text="清除", width=5, command=lambda: self.clear_size_filter()).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(size_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+        ttk.Button(size_frame, text="匯出 CSV", command=self.export_csv).pack(side=tk.LEFT, padx=4)
+        ttk.Button(size_frame, text="匯出 Excel", command=self.export_excel).pack(side=tk.LEFT, padx=2)
+        # 綁定自動搜尋
+        for var in [self.date_from_var, self.date_to_var, self.size_min_var, self.size_max_var]:
+            var.trace_add("write", lambda *_: self.after(600, self.do_search))
+
         # 結果表格
         mid = ttk.Frame(self, padding=(10,0,10,0))
         mid.pack(fill=tk.BOTH, expand=True)
@@ -466,7 +521,9 @@ class App(BaseTk):
 
     def do_search(self):
         kw = self.keyword_var.get()
-        rows = self.indexer.search(kw, self.current_category, limit=8000)
+        date_from, date_to = self.get_date_range()
+        size_from, size_to = self.get_size_range()
+        rows = self.indexer.search(kw, self.current_category, limit=8000, date_from=date_from, date_to=date_to, size_from=size_from, size_to=size_to)
         self.tree.delete(*self.tree.get_children())
         for name, path, dirpath, ext, size, mtime in rows:
             try:
@@ -544,6 +601,161 @@ class App(BaseTk):
         except queue.Empty:
             pass
         self.after(400, self.check_progress)
+
+    def _show_hint(self, entry, hint):
+        if not entry.get():
+            entry.insert(0, hint)
+            entry.configure(foreground="#9ca3af")
+            def on_focus_in(e):
+                if entry.get() == hint:
+                    entry.delete(0, tk.END)
+                    entry.configure(foreground="black")
+            def on_focus_out(e):
+                if not entry.get():
+                    entry.insert(0, hint)
+                    entry.configure(foreground="#9ca3af")
+            entry.bind("<FocusIn>", on_focus_in)
+            entry.bind("<FocusOut>", on_focus_out)
+
+    def get_date_range(self):
+        """解析日期篩選，回傳 timestamp 或 None"""
+        from datetime import datetime as _dt
+        def parse(s):
+            s=s.strip()
+            if not s or s=="YYYY-MM-DD":
+                return None
+            for fmt in ("%Y-%m-%d","%Y/%m/%d","%Y.%m.%d"):
+                try:
+                    return _dt.strptime(s, fmt).timestamp()
+                except: pass
+            return None
+        df = parse(self.date_from_var.get()) if hasattr(self, "date_from_var") else None
+        dt = parse(self.date_to_var.get()) if hasattr(self, "date_to_var") else None
+        # 若只有日期，to 設為當天 23:59:59
+        if dt is not None:
+            # parse 已是 00:00，補 86399 秒
+            dt += 86399
+        return df, dt
+
+    def get_size_range(self):
+        """解析大小篩選 MB -> bytes"""
+        def parse_mb(s):
+            s=s.strip()
+            if not s:
+                return None
+            try:
+                return int(float(s) * 1024 * 1024)
+            except:
+                return None
+        sf = parse_mb(self.size_min_var.get()) if hasattr(self, "size_min_var") else None
+        st = parse_mb(self.size_max_var.get()) if hasattr(self, "size_max_var") else None
+        return sf, st
+
+    def set_date_preset(self, preset):
+        from datetime import datetime as _dt, timedelta
+        today = _dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        if preset=="today":
+            self.date_from_var.set(today.strftime("%Y-%m-%d"))
+            self.date_to_var.set(today.strftime("%Y-%m-%d"))
+        elif preset=="7d":
+            self.date_from_var.set((today - timedelta(days=6)).strftime("%Y-%m-%d"))
+            self.date_to_var.set(today.strftime("%Y-%m-%d"))
+        elif preset=="30d":
+            self.date_from_var.set((today - timedelta(days=29)).strftime("%Y-%m-%d"))
+            self.date_to_var.set(today.strftime("%Y-%m-%d"))
+        self.do_search()
+
+    def clear_date_filter(self):
+        self.date_from_var.set("")
+        self.date_to_var.set("")
+        self.do_search()
+
+    def set_size_preset(self, preset):
+        if preset=="<10":
+            self.size_min_var.set("")
+            self.size_max_var.set("10")
+        elif preset=="10-100":
+            self.size_min_var.set("10")
+            self.size_max_var.set("100")
+        elif preset==">100":
+            self.size_min_var.set("100")
+            self.size_max_var.set("")
+        self.do_search()
+
+    def clear_size_filter(self):
+        self.size_min_var.set("")
+        self.size_max_var.set("")
+        self.do_search()
+
+    def export_csv(self):
+        rows = list(self.tree.get_children())
+        if not rows:
+            messagebox.showinfo("匯出 CSV", "目前沒有資料可匯出")
+            return
+        path = filedialog.asksaveasfilename(title="匯出 CSV", defaultextension=".csv", filetypes=[("CSV","*.csv")], initialfile="X搜索結果.csv")
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["檔名","完整路徑","資料夾","類型","大小","修改日期"])
+                for iid in rows:
+                    vals = self.tree.item(iid, "values")
+                    tags = self.tree.item(iid, "tags")
+                    full = tags[0] if tags else ""
+                    # vals: name, dir, size_str, mtime_str, ext
+                    name = vals[0] if len(vals)>0 else ""
+                    dirp = vals[1] if len(vals)>1 else ""
+                    size_s = vals[2] if len(vals)>2 else ""
+                    mtime_s = vals[3] if len(vals)>3 else ""
+                    ext = vals[4] if len(vals)>4 else ""
+                    w.writerow([name, full, dirp, ext, size_s, mtime_s])
+            self.status_var.set(f"已匯出 {len(rows)} 筆到 {path}")
+            try: os.startfile(path)
+            except: pass
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e))
+
+    def export_excel(self):
+        rows = list(self.tree.get_children())
+        if not rows:
+            messagebox.showinfo("匯出 Excel", "目前沒有資料可匯出")
+            return
+        try:
+            import openpyxl
+        except ImportError:
+            if messagebox.askyesno("需要 openpyxl", "尚未安裝 openpyxl，是否改用 CSV 匯出？"):
+                self.export_csv()
+            return
+        path = filedialog.asksaveasfilename(title="匯出 Excel", defaultextension=".xlsx", filetypes=[("Excel","*.xlsx")], initialfile="X搜索結果.xlsx")
+        if not path:
+            return
+        try:
+            from openpyxl import Workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "搜尋結果"
+            ws.append(["檔名","完整路徑","資料夾","類型","大小","修改日期"])
+            for iid in rows:
+                vals = self.tree.item(iid, "values")
+                tags = self.tree.item(iid, "tags")
+                full = tags[0] if tags else ""
+                name = vals[0] if len(vals)>0 else ""
+                dirp = vals[1] if len(vals)>1 else ""
+                size_s = vals[2] if len(vals)>2 else ""
+                mtime_s = vals[3] if len(vals)>3 else ""
+                ext = vals[4] if len(vals)>4 else ""
+                ws.append([name, full, dirp, ext, size_s, mtime_s])
+            # 自動欄寬
+            for col in ws.columns:
+                max_len = max(len(str(c.value)) if c.value else 0 for c in col)
+                ws.column_dimensions[col[0].column_letter].width = min(max_len+2, 50)
+            wb.save(path)
+            self.status_var.set(f"已匯出 {len(rows)} 筆到 {path}")
+            try: os.startfile(path)
+            except: pass
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e))
 
     def get_selected_path(self):
         sel = self.tree.selection()
