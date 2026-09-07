@@ -58,7 +58,7 @@ except:
 CATEGORIES = {
     "全部": None,
     "3D圖": {".sldprt",".sldasm",".sldprtdot",".sldasmdot",".prt",".asm",".step",".stp",".iges",".igs",".x_t",".x_b",".stl",".obj",".fbx",".3dm",".skp",".max",".ipt",".iam",".catpart",".catproduct"},
-    "2D圖": {".dwg",".dxf",".dwf",".dwt",".pdf",".ai",".psd",".cdr",".svg"}, # dwg/dxf 同時算 2D，也會在 3D 圖中出現是正常的
+    "2D圖": {".dwg",".dxf",".dwf",".dwt",".pdf",".ai",".psd",".cdr",".svg",".slddrw",".slddrt",".drwdot"}, # dwg/dxf 同時算 2D，也會在 3D 圖中出現是正常的
     "Excel": {".xls",".xlsx",".xlsm",".csv"},
     "PPT": {".ppt",".pptx",".pptm"},
     "Word": {".doc",".docx",".docm"},
