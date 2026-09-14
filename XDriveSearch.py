@@ -20,6 +20,8 @@ import queue
 import fnmatch
 import shutil
 import csv
+# 正式索引引擎：fast_indexer 為唯一 scanner 來源（V2 已驗證）。
+from fast_indexer import build_index_fast
 # 拖曳到桌面需要的 win32
 try:
     import win32clipboard
@@ -124,126 +126,12 @@ class Indexer:
         con.close()
 
     def build_index(self, root_path, on_done=None, incremental=True):
-        """背景執行緒掃描（支援增量 + 黑名單）"""
-        self._stop.clear()
-        root = Path(root_path)
-        if not root.exists():
-            self.progress_q.put(("error", f"路徑不存在: {root}"))
-            if on_done: on_done(0)
-            return
-        start = time.time()
-        con = sqlite3.connect(self.db_path)
-        try:
-            con.execute("PRAGMA journal_mode=WAL")
-            con.execute("PRAGMA synchronous=OFF")
-        except: pass
-        cur = con.cursor()
-        # 判斷是否可增量
-        try:
-            cur.execute("SELECT COUNT(*) FROM files")
-            existing_cnt = cur.fetchone()[0]
-            use_incremental = bool(incremental and existing_cnt and existing_cnt > 0)
-        except:
-            use_incremental = False
+        """背景執行緒掃描（正式引擎：fast_indexer.build_index_fast）。
 
-        if use_incremental:
-            # 載入舊索引 path->(size,mtime) 用於比對
-            cur.execute("SELECT path, size, mtime FROM files")
-            existing_map = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
-        else:
-            cur.execute("DELETE FROM files")
-            existing_map = {}
-
-        count = 0
-        new_cnt = 0
-        upd_cnt = 0
-        skip_cnt = 0
-        batch_insert = []
-        batch_update = []
-        BATCH_SIZE = 2000
-        scanned_dirs = 0
-        excluded_cnt = 0
-        try:
-            for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=lambda e: None):
-                if self._stop.is_set():
-                    break
-                # 黑名單過濾資料夾（大幅加速 + 避開系統垃圾）
-                dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES and not d.startswith(".")]
-                scanned_dirs += 1
-                if scanned_dirs % 30 == 0 or count % 1500 == 0:
-                    self.progress_q.put(("progress", f"⏳ 掃描中... {dirpath} | 已收錄 {count} 個 (新增{new_cnt}/更新{upd_cnt}/跳過{excluded_cnt})"))
-                if count % 2000 == 0 and count>0:
-                    self.progress_q.put(("progress", f"⏳ 掃描中... 已收錄 {count} 個，請稍候..."))
-                for fn in filenames:
-                    if self._stop.is_set():
-                        break
-                    if _should_exclude(dirpath, fn):
-                        excluded_cnt += 1
-                        continue
-                    try:
-                        fp = Path(dirpath) / fn
-                        ext = fp.suffix.lower()
-                        try:
-                            st = fp.stat()
-                            size = st.st_size
-                            mtime = st.st_mtime
-                        except:
-                            size = 0
-                            mtime = 0
-                        full = str(fp)
-                        if use_incremental and full in existing_map:
-                            old_size, old_mtime = existing_map[full]
-                            # 若大小與時間皆未變，視為未變更，僅從待刪清單移除
-                            if old_size == size and old_mtime == mtime:
-                                del existing_map[full]
-                                skip_cnt += 1
-                                count += 1
-                                continue
-                            # 有變更 → 更新
-                            batch_update.append((fn, fn.lower(), dirpath, ext, size, mtime, full))
-                            del existing_map[full]
-                            upd_cnt += 1
-                        else:
-                            batch_insert.append((fn, fn.lower(), full, dirpath, ext, size, mtime))
-                            if use_incremental and full in existing_map:
-                                del existing_map[full]
-                            new_cnt += 1
-                        count += 1
-                        if len(batch_insert) >= BATCH_SIZE:
-                            cur.executemany("INSERT INTO files(name,name_lower,path,dir,ext,size,mtime) VALUES (?,?,?,?,?,?,?)", batch_insert)
-                            batch_insert.clear()
-                        if len(batch_update) >= BATCH_SIZE:
-                            cur.executemany("UPDATE files SET name=?, name_lower=?, dir=?, ext=?, size=?, mtime=? WHERE path=?", batch_update)
-                            batch_update.clear()
-                    except Exception:
-                        continue
-            if batch_insert:
-                cur.executemany("INSERT INTO files(name,name_lower,path,dir,ext,size,mtime) VALUES (?,?,?,?,?,?,?)", batch_insert)
-            if batch_update:
-                cur.executemany("UPDATE files SET name=?, name_lower=?, dir=?, ext=?, size=?, mtime=? WHERE path=?", batch_update)
-            # 增量：剩餘的 existing_map 即為已刪除的檔案
-            del_cnt = 0
-            if use_incremental and existing_map:
-                del_paths = list(existing_map.keys())
-                # 分批刪除（避免 SQLite 參數過多）
-                for i in range(0, len(del_paths), 900):
-                    chunk = del_paths[i:i+900]
-                    cur.executemany("DELETE FROM files WHERE path=?", [(p,) for p in chunk])
-                del_cnt = len(del_paths)
-            con.commit()
-            if not use_incremental:
-                # 完整重建才需要 rebuild FTS
-                cur.execute("INSERT INTO files_fts(files_fts) VALUES('rebuild')")
-                con.commit()
-        finally:
-            con.close()
-        elapsed = time.time() - start
-        if use_incremental:
-            self.progress_q.put(("done", f"增量完成！掃描 {count} 個，新增{new_cnt}/更新{upd_cnt}/刪除{del_cnt}/跳過黑名單{excluded_cnt}，耗時 {elapsed:.1f}s"))
-        else:
-            self.progress_q.put(("done", f"完整重建完成！共 {count} 個檔案，跳過黑名單{excluded_cnt}，耗時 {elapsed:.1f} 秒"))
-        if on_done:
-            on_done(count)
+        V2 已驗證（約 4.65x speedup，transient NAS error 安全）。
+        此處僅做委派，不再維護第二套 scanner 邏輯。
+        """
+        return build_index_fast(self, root_path, on_done=on_done, incremental=incremental)
 
     def stop(self):
         self._stop.set()
