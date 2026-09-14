@@ -147,6 +147,10 @@ def build_index_fast(self, root_path, on_done=None, incremental=True):
                             if not entry.is_file(follow_symlinks=False):
                                 continue
                         except OSError:
+                            # The entry exists but could not be classified. Preserve any
+                            # old row instead of letting reconciliation mark it deleted.
+                            if use_incremental:
+                                existing_map.pop(entry.path, None)
                             file_error_cnt += 1
                             continue
 
